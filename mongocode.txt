@@ -1,0 +1,34 @@
+import pymongo
+
+# MongoDB connection settings
+client = pymongo.MongoClient("mongodb://localhost:27017/")
+db = client["your_database"]  # Replace with your database name
+coll1 = db["coll1"]  # Replace with your collection names
+coll2 = db["coll2"]
+
+# Function to fetch and process data
+def process_data():
+    # Example query to fetch specific fields from coll1
+    cursor = coll1.find({}, {"_id": 0, "field1": 1, "field2": 1})
+    
+    # Process each document from coll1
+    for document in cursor:
+        # Example processing logic
+        field1_value = document.get("field1")
+        field2_value = document.get("field2")
+        
+        # Example condition to store in coll2
+        if field1_value is not None:
+            coll2.insert_one({"field1_processed": field1_value})
+        elif field2_value is not None:
+            coll2.insert_one({"field2_processed": field2_value})
+        else:
+            continue
+
+# Execute the data processing function
+process_data()
+
+# Close MongoDB connection
+client.close()
+
+print("Data processing completed and stored in coll2.")
