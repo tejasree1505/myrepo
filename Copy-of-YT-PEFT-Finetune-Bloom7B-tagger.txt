@@ -1,0 +1,242 @@
+Using ?? PEFT & bitsandbytes to finetune a LoRa checkpoint
+!pip install -q bitsandbytes datasets accelerate loralib
+!pip install -q git+https://github.com/huggingface/transformers.git@main git+https://github.com/huggingface/peft.git
+???????????????????????????????????????? 76.3/76.3 MB 20.0 MB/s eta 0:00:00
+?????????????????????????????????????? 469.0/469.0 KB 11.8 MB/s eta 0:00:00
+?????????????????????????????????????? 212.8/212.8 KB 14.7 MB/s eta 0:00:00
+???????????????????????????????????????? 1.0/1.0 MB 8.5 MB/s eta 0:00:00
+?????????????????????????????????????? 212.2/212.2 KB 20.3 MB/s eta 0:00:00
+?????????????????????????????????????? 110.5/110.5 KB 12.1 MB/s eta 0:00:00
+?????????????????????????????????????? 132.9/132.9 KB 16.9 MB/s eta 0:00:00
+?????????????????????????????????????? 199.2/199.2 KB 20.7 MB/s eta 0:00:00
+?????????????????????????????????????? 158.8/158.8 KB 16.8 MB/s eta 0:00:00
+?????????????????????????????????????? 114.2/114.2 KB 13.9 MB/s eta 0:00:00
+?????????????????????????????????????? 264.6/264.6 KB 26.7 MB/s eta 0:00:00
+ents to build wheel ... etadata (pyproject.toml) ... ents to build wheel ... etadata (pyproject.toml) ... ???????????????????????????????????????? 7.6/7.6 MB 78.8 MB/s eta 0:00:00
+ers (pyproject.toml) ... l) ... 
+from huggingface_hub import notebook_login
+
+notebook_login()
+{"model_id":"e7927778c808426f8e7d571ff637af93","version_major":2,"version_minor":0}
+!nvidia-smi -L
+GPU 0: NVIDIA A100-SXM4-40GB (UUID: GPU-e422d711-e39a-eaa9-2988-783d144f55c1)
+Setup the model
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
+import torch
+import torch.nn as nn
+import bitsandbytes as bnb
+from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained(
+    "bigscience/bloom-7b1",
+    load_in_8bit=True,
+    device_map='auto',
+)
+
+tokenizer = AutoTokenizer.from_pretrained("bigscience/bloom-7b1")
+
+===================================BUG REPORT===================================
+Welcome to bitsandbytes. For bug reports, please submit your error trace to: https://github.com/TimDettmers/bitsandbytes/issues
+================================================================================
+CUDA_SETUP: WARNING! libcudart.so not found in any environmental path. Searching /usr/local/cuda/lib64...
+CUDA SETUP: CUDA runtime path found: /usr/local/cuda/lib64/libcudart.so
+CUDA SETUP: Highest compute capability among GPUs detected: 8.0
+CUDA SETUP: Detected CUDA version 118
+CUDA SETUP: Loading binary /usr/local/lib/python3.9/dist-packages/bitsandbytes/libbitsandbytes_cuda118.so...
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/cuda_setup/main.py:136: UserWarning: /usr/lib64-nvidia did not contain libcudart.so as expected! Searching further paths...
+  warn(msg)
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/cuda_setup/main.py:136: UserWarning: WARNING: The following directories listed in your path were found to be non-existent: {PosixPath('/sys/fs/cgroup/memory.events /var/colab/cgroup/jupyter-children/memory.events')}
+  warn(msg)
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/cuda_setup/main.py:136: UserWarning: WARNING: The following directories listed in your path were found to be non-existent: {PosixPath('//colab.research.google.com/tun/m/cc48301118ce562b961b3c22d803539adc1e0c19/gpu-a100-s-2gmbmgolbub5k --tunnel_background_save_delay=10s --tunnel_periodic_background_save_frequency=30m0s --enable_output_coalescing=true --output_coalescing_required=true'), PosixPath('--listen_host=172.28.0.12 --target_host=172.28.0.12 --tunnel_background_save_url=https')}
+  warn(msg)
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/cuda_setup/main.py:136: UserWarning: WARNING: The following directories listed in your path were found to be non-existent: {PosixPath('/env/python')}
+  warn(msg)
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/cuda_setup/main.py:136: UserWarning: WARNING: The following directories listed in your path were found to be non-existent: {PosixPath('module'), PosixPath('//ipykernel.pylab.backend_inline')}
+  warn(msg)
+{"model_id":"a4aca3caf668475ea0393f4b30759dce","version_major":2,"version_minor":0}
+Overriding torch_dtype=None with `torch_dtype=torch.float16` due to requirements of `bitsandbytes` to enable model loading in mixed int8. Either pass torch_dtype=torch.float16 or don't pass this argument at all to remove this warning.
+{"model_id":"864806aa8db544a685e7645afd1cc6fd","version_major":2,"version_minor":0}
+{"model_id":"5d357d1ee5434d55a8d2ad84d67e7fde","version_major":2,"version_minor":0}
+{"model_id":"a54af21bebad43919d441f7439c6f3ea","version_major":2,"version_minor":0}
+{"model_id":"1dc45ac9a1304a4cac48dea1ed62198d","version_major":2,"version_minor":0}
+{"model_id":"a9d8f269a95045f097a1affced473508","version_major":2,"version_minor":0}
+{"model_id":"b74befb90b5a42f4a30e3fb55fc665e4","version_major":2,"version_minor":0}
+{"model_id":"811e1ab385be434a8a9e0076d0f5a959","version_major":2,"version_minor":0}
+{"model_id":"6bd93937c3a0434d87ba82e97054c7f4","version_major":2,"version_minor":0}
+Freezing the original weights
+for param in model.parameters():
+  param.requires_grad = False  # freeze the model - train adapters later
+  if param.ndim == 1:
+    # cast the small parameters (e.g. layernorm) to fp32 for stability
+    param.data = param.data.to(torch.float32)
+
+model.gradient_checkpointing_enable()  # reduce number of stored activations
+model.enable_input_require_grads()
+
+class CastOutputToFloat(nn.Sequential):
+  def forward(self, x): return super().forward(x).to(torch.float32)
+model.lm_head = CastOutputToFloat(model.lm_head)
+Setting up the LoRa Adapters
+def print_trainable_parameters(model):
+    """
+    Prints the number of trainable parameters in the model.
+    """
+    trainable_params = 0
+    all_param = 0
+    for _, param in model.named_parameters():
+        all_param += param.numel()
+        if param.requires_grad:
+            trainable_params += param.numel()
+    print(
+        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
+    )
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(
+    r=16, #attention heads
+    lora_alpha=32, #alpha scaling
+    # target_modules=["q_proj", "v_proj"], #if you know the
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM" # set this for CLM or Seq2Seq
+)
+
+model = get_peft_model(model, config)
+print_trainable_parameters(model)
+trainable params: 7864320 || all params: 7076880384 || trainable%: 0.11112693126452029
+Data
+import transformers
+from datasets import load_dataset
+data = load_dataset("Abirate/english_quotes")
+{"model_id":"ceb7dff5fa364f4689688fd85e7ed4d0","version_major":2,"version_minor":0}
+Downloading and preparing dataset json/Abirate--english_quotes to /root/.cache/huggingface/datasets/Abirate___json/Abirate--english_quotes-6e72855d06356857/0.0.0/0f7e3662623656454fcd2b650f34e886a7db4b9104504885bd462096cc7a9f51...
+{"model_id":"64f3155f66d84ed08d945abcb7e9a9df","version_major":2,"version_minor":0}
+{"model_id":"9518c8aa7e3d4affbbf2dc3a0e7eb221","version_major":2,"version_minor":0}
+{"model_id":"f0969e2407164dd89c5f3c157c5c4398","version_major":2,"version_minor":0}
+{"model_id":"00e70866c6614ec2aadcd6c725676f51","version_major":2,"version_minor":0}
+Dataset json downloaded and prepared to /root/.cache/huggingface/datasets/Abirate___json/Abirate--english_quotes-6e72855d06356857/0.0.0/0f7e3662623656454fcd2b650f34e886a7db4b9104504885bd462096cc7a9f51. Subsequent calls will reuse this data.
+{"model_id":"23e584a31f1146cfbfc230cf1f869227","version_major":2,"version_minor":0}
+def merge_columns(example):
+    example["prediction"] = example["quote"] + " ->: " + str(example["tags"])
+    return example
+
+data['train'] = data['train'].map(merge_columns)
+data['train']["prediction"][:5]
+{"model_id":"93dcef37faa141a3b6588686f0b209c1","version_major":2,"version_minor":0}
+[""Be yourself; everyone else is already taken." ->: ['be-yourself', 'gilbert-perreira', 'honesty', 'inspirational', 'misattributed-oscar-wilde', 'quote-investigator']",
+ ""I'm selfish, impatient and a little insecure. I make mistakes, I am out of control and at times hard to handle. But if you can't handle me at my worst, then you sure as hell don't deserve me at my best." ->: ['best', 'life', 'love', 'mistakes', 'out-of-control', 'truth', 'worst']",
+ ""Two things are infinite: the universe and human stupidity; and I'm not sure about the universe." ->: ['human-nature', 'humor', 'infinity', 'philosophy', 'science', 'stupidity', 'universe']",
+ ""So many books, so little time." ->: ['books', 'humor']",
+ ""A room without books is like a body without a soul." ->: ['books', 'simile', 'soul']"]
+data['train'][0]
+{'quote': '"Be yourself; everyone else is already taken."',
+ 'author': 'Oscar Wilde',
+ 'tags': ['be-yourself',
+  'gilbert-perreira',
+  'honesty',
+  'inspirational',
+  'misattributed-oscar-wilde',
+  'quote-investigator'],
+ 'prediction': ""Be yourself; everyone else is already taken." ->: ['be-yourself', 'gilbert-perreira', 'honesty', 'inspirational', 'misattributed-oscar-wilde', 'quote-investigator']"}
+data = data.map(lambda samples: tokenizer(samples['prediction']), batched=True)
+{"model_id":"77e9cc01e6bb4170936bc7592902ee20","version_major":2,"version_minor":0}
+data
+DatasetDict({
+    train: Dataset({
+        features: ['quote', 'author', 'tags', 'prediction', 'input_ids', 'attention_mask'],
+        num_rows: 2508
+    })
+})
+Training
+
+trainer = transformers.Trainer(
+    model=model,
+    train_dataset=data['train'],
+    args=transformers.TrainingArguments(
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=4,
+        warmup_steps=100,
+        max_steps=200,
+        learning_rate=2e-4,
+        fp16=True,
+        logging_steps=1,
+        output_dir='outputs'
+    ),
+    data_collator=transformers.DataCollatorForLanguageModeling(tokenizer, mlm=False)
+)
+model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
+trainer.train()
+/usr/local/lib/python3.9/dist-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
+  warnings.warn(
+You're using a BloomTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/autograd/_functions.py:298: UserWarning: MatMul8bitLt: inputs will be cast from torch.float32 to float16 during quantization
+  warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
+<IPython.core.display.HTML object>
+TrainOutput(global_step=200, training_loss=2.327150729894638, metrics={'train_runtime': 771.2822, 'train_samples_per_second': 4.149, 'train_steps_per_second': 0.259, 'total_flos': 1.3172999996964864e+16, 'train_loss': 2.327150729894638, 'epoch': 1.28})
+Share adapters on the ?? Hub
+model.push_to_hub("samwit/bloom-7b1-lora-tagger",
+                  use_auth_token=True,
+                  commit_message="basic training",
+                  private=True)
+{"model_id":"0ec66e82bc8247e98e98686c051f89e9","version_major":2,"version_minor":0}
+{"model_id":"95f2c69bcde84296b9f505149a5bf23e","version_major":2,"version_minor":0}
+CommitInfo(commit_url='https://huggingface.co/samwit/bloom-7b1-lora-tagger/commit/62cfae6c87a7d657b2bd3e6e2abac2d5a7d07caf', commit_message='basic training', commit_description='', oid='62cfae6c87a7d657b2bd3e6e2abac2d5a7d07caf', pr_url=None, pr_revision=None, pr_num=None)
+Load adapters from the Hub
+import torch
+from peft import PeftModel, PeftConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+peft_model_id = "samwit/bloom-7b1-lora-tagger"
+config = PeftConfig.from_pretrained(peft_model_id)
+model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, return_dict=True, load_in_8bit=True, device_map='auto')
+tokenizer = AutoTokenizer.from_pretrained(config.base_model_name_or_path)
+
+# Load the Lora model
+model = PeftModel.from_pretrained(model, peft_model_id)
+
+===================================BUG REPORT===================================
+Welcome to bitsandbytes. For bug reports, please submit your error trace to: https://github.com/TimDettmers/bitsandbytes/issues
+================================================================================
+CUDA_SETUP: WARNING! libcudart.so not found in any environmental path. Searching /usr/local/cuda/lib64...
+CUDA SETUP: CUDA runtime path found: /usr/local/cuda/lib64/libcudart.so
+CUDA SETUP: Highest compute capability among GPUs detected: 8.0
+CUDA SETUP: Detected CUDA version 118
+CUDA SETUP: Loading binary /usr/local/lib/python3.9/dist-packages/bitsandbytes/libbitsandbytes_cuda118.so...
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/cuda_setup/main.py:136: UserWarning: /usr/lib64-nvidia did not contain libcudart.so as expected! Searching further paths...
+  warn(msg)
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/cuda_setup/main.py:136: UserWarning: WARNING: The following directories listed in your path were found to be non-existent: {PosixPath('/sys/fs/cgroup/memory.events /var/colab/cgroup/jupyter-children/memory.events')}
+  warn(msg)
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/cuda_setup/main.py:136: UserWarning: WARNING: The following directories listed in your path were found to be non-existent: {PosixPath('--listen_host=172.28.0.12 --target_host=172.28.0.12 --tunnel_background_save_url=https'), PosixPath('//colab.research.google.com/tun/m/cc48301118ce562b961b3c22d803539adc1e0c19/gpu-a100-s-c1xr75l0apxr --tunnel_background_save_delay=10s --tunnel_periodic_background_save_frequency=30m0s --enable_output_coalescing=true --output_coalescing_required=true')}
+  warn(msg)
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/cuda_setup/main.py:136: UserWarning: WARNING: The following directories listed in your path were found to be non-existent: {PosixPath('/env/python')}
+  warn(msg)
+/usr/local/lib/python3.9/dist-packages/bitsandbytes/cuda_setup/main.py:136: UserWarning: WARNING: The following directories listed in your path were found to be non-existent: {PosixPath('module'), PosixPath('//ipykernel.pylab.backend_inline')}
+  warn(msg)
+{"model_id":"9853102a87bb48e4b5e44659344cf8c6","version_major":2,"version_minor":0}
+{"model_id":"bf2681d51529472594962ff2479e093e","version_major":2,"version_minor":0}
+Overriding torch_dtype=None with `torch_dtype=torch.float16` due to requirements of `bitsandbytes` to enable model loading in mixed int8. Either pass torch_dtype=torch.float16 or don't pass this argument at all to remove this warning.
+{"model_id":"c2737f2d82f74387a79973ef24c12361","version_major":2,"version_minor":0}
+{"model_id":"441b9419c77b4382a698d8321e38873c","version_major":2,"version_minor":0}
+{"model_id":"dbef3e1fcdd2416fa91daca4498de075","version_major":2,"version_minor":0}
+{"model_id":"6ae9608924f84327bc21291a01317599","version_major":2,"version_minor":0}
+{"model_id":"35734133f5364871a179a222d64363d0","version_major":2,"version_minor":0}
+{"model_id":"a80f36f36cd84d1fa1ac2b8ed7397b86","version_major":2,"version_minor":0}
+{"model_id":"bb266c20cd5d44028229c34b91af259d","version_major":2,"version_minor":0}
+{"model_id":"2a12754ffc2044c7abf5e16b26e6a289","version_major":2,"version_minor":0}
+{"model_id":"2744a3554c4744fba09b6183ba03572d","version_major":2,"version_minor":0}
+Inference
+batch = tokenizer(""Training models with PEFT and LoRa is cool" ->: ", return_tensors='pt')
+
+with torch.cuda.amp.autocast():
+  output_tokens = model.generate(**batch, max_new_tokens=50)
+
+print('\n\n', tokenizer.decode(output_tokens[0], skip_special_tokens=True))
+
+
+ "Training models with PEFT and LoRa is cool" ->:  ['training', 'teaching']
+
+A:
+
+I think the best way to describe it is to say that it is a combination of the two. The idea is that you can train a model on a dataset, and then you can use the
+
