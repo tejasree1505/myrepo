@@ -1,0 +1,92 @@
+learning_rate = 5e-5
+epochs = 5
+Optimizer
+First we need to create a optimizer, that will do the optimization of model parameters using gradient descent based algorithm
+
+from transformers import AdamW
+
+optimizer = AdamW(model.parameters(), lr=learning_rate)
+# loss_fn = model.get_loss()
+/opt/conda/lib/python3.10/site-packages/transformers/optimization.py:411: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
+  warnings.warn(
+Optimization loop
+This will do the training/finetuning of our model.
+
+In the GPT-2 Question Answering model, the objective is to predict the start and end indices of answer in the context.The input_ids tensor contains the question and context, and the labels tensor contains start and end indices of answer in the context.
+
+def train_loop(dataloader, model, optimizer):
+    
+    # set the model to training model
+    model.train()
+    
+    for batch in dataloader:
+        optimizer.zero_grad()
+        
+        # previous tokens
+        input_ids = batch[0]['input_ids'].to(device)
+        attention_mask = batch[0]['attention_mask'].to(device)
+        token_type_ids = batch[0]['token_type_ids'].to(device)
+        start_positions = batch[0]['start_positions'].to(device)
+        end_positions = batch[0]['end_positions'].to(device)
+        
+        labels = {
+            'start_positions': start_positions,
+            'end_positions': end_positions
+        }
+        
+       # get outputs from model
+        outputs = model(input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
+
+        # calculate loss
+        loss_start = nn.CrossEntropyLoss()(outputs.start_logits, start_positions)
+        loss_end = nn.CrossEntropyLoss()(outputs.end_logits, end_positions)
+        loss = (loss_start + loss_end) / 2  # average loss for start and end positions
+        
+        # backpropagation
+        loss.backward()
+        optimizer.step()
+        
+
+def test_loop(dataloader, model):
+    # set the model of evaluation
+    model.eval()
+    val_loss = 0
+    
+    # Evaluating the model with torch.no_grad() ensures that no gradients are computed during test mode
+    with torch.no_grad():
+        for batch in dataloader:
+            # previous tokens
+            input_ids = batch[0]['input_ids'].to(device)
+            attention_mask = batch[0]['attention_mask'].to(device)
+            token_type_ids = batch[0]['token_type_ids'].to(device)
+            start_positions = batch[0]['start_positions'].to(device)
+            end_positions = batch[0]['end_positions'].to(device)
+
+            labels = {
+                'start_positions': start_positions,
+                'end_positions': end_positions
+            }
+
+           # get outputs from model
+            outputs = model(input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
+
+            # calculate loss
+            loss_start = nn.CrossEntropyLoss()(outputs.start_logits, start_positions)
+            loss_end = nn.CrossEntropyLoss()(outputs.end_logits, end_positions)
+            loss = (loss_start + loss_end) / 2  # average loss for start and end positions
+            
+            val_loss += loss.item()
+    
+    # Print the validation loss for this epoch
+    print(f"Validation Loss: {val_loss/len(dataloader)}")
+    
+import transformers
+import torch.nn as nn
+transformers.logging.set_verbosity_error()
+
+for t in range(epochs):
+    print(f"Epoch {t+1}\n ---------------------------")
+    train_loop(train_dataloader, model, optimizer)
+    test_loop(test_dataloader, model)
+
+print("Done!")
