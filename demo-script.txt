@@ -16,4 +16,11 @@ The small downside is that the extra weights add to the overall memory needed at
 After generating insights with the finetuned GPT-2 model, we feed the inferences into FinBERT for sentiment analysis. FinBERT is a BERT-based model specifically trained for financial text, enabling it to understand the sentiment behind financial statements effectively. We further fine-tuned it on the target features to provide more accuracy.
 This integration allows us to not only provide detailed explanations of financial ratios but also analyze the sentiment associated with these explanations. For example, if the GPT-2 model explains an increase in the current ratio, FinBERT can assess whether this change is perceived positively or negatively in the financial context. This added layer of analysis enhances the overall insight provided to users. It enables a deeper understanding of how financial metrics impact stakeholder sentiment, which is crucial for comprehensive financial analysis.
 
-While our finetuned model shows promising results, it’s important to note that it doesn't always provide perfect answers. This prototype demonstrates the potential of generative AI in financial analysis. For more accurate and reliable inferences, models like LLaMA could be employed in the future, offering improved performance and consistency
+While our finetuned model shows promising results, it’s important to note that it doesn't always provide perfect answers. This prototype demonstrates the potential of generative AI in financial analysis. For more accurate and reliable inferences, models like LLaMA could be employed in the future, offering improved performance and consistency.
+
+extras::
+r (attention heads): This parameter defines the number of attention heads used in the transformer layers. Attention heads allow the model to focus on different parts of the input sequence, enabling it to capture various aspects of the context.
+
+lora_alpha (alpha scaling): This parameter controls the scaling factor for the LoRA (Low-Rank Adaptation) layers. It helps in adjusting the magnitude of the learned low-rank updates, ensuring they effectively complement the pre-trained model weights.
+
+
